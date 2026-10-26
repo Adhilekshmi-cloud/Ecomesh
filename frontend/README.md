@@ -1,4 +1,12 @@
-# React + Vite
+# EcoMesh frontend
+
+React/Vite client for the EcoMesh FastAPI backend. Start the backend on port 8000
+with its pinned `requirements.txt`, then run `npm install` and `npm run dev` here.
+The shared `.env` sets `VITE_API_URL=http://localhost:8000`.
+
+Validation commands: `npm run build` and `npm run lint`.
+
+## Vite tooling reference
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 

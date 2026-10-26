@@ -1,146 +1,60 @@
-/**
- * JWT-based authentication for the EcoMesh FastAPI backend.
- *
- * Replaces the previous Supabase auth module while keeping the same
- * public surface so all existing components continue to work unchanged:
- *   - useAuth() → { user, profile, loading, isAuthenticated, signIn, signUp, signOut, token }
- *   - signIn(email, password) → resolves on success, throws on failure
- *   - signUp({ email, password, name, role, school, studentClass, studentHouse })
- *   - signOut()
- *
- * The JWT access token is stored in sessionStorage (cleared on tab close).
- * Only the token string is persisted — never passwords or raw secrets.
- */
-
-import { useState, useEffect, useCallback } from 'react';
-import { apiLogin, apiRegister, apiMe } from './api';
-
+import { createContext, createElement, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { apiLogin, apiRegister, get, post, segment } from './api';
 const TOKEN_KEY = 'ecomesh_access_token';
-
-// ---------------------------------------------------------------------------
-// Standalone helpers (called from AuthPage and other places that imported them)
-// ---------------------------------------------------------------------------
-
-export async function signIn(email, password) {
-  const data = await apiLogin(email, password);
-  // FastAPI OAuth2: { access_token, token_type }
-  const token = data.access_token;
-  sessionStorage.setItem(TOKEN_KEY, token);
-  return token;
-}
-
-export async function signUp({
-  email,
-  password,
-  name,
-  role = 'student',
-  school = 'Model Higher Secondary School',
-  studentClass = 'Class 11-A',
-  studentHouse = 'Terra House',
-}) {
-  await apiRegister({ email, password, name, role, school, studentClass, studentHouse });
-  // Auto sign-in after successful registration
-  return signIn(email, password);
-}
-
-export function signOut() {
-  sessionStorage.removeItem(TOKEN_KEY);
-}
-
-// ---------------------------------------------------------------------------
-// useAuth hook — keeps the same interface as the Supabase version
-// ---------------------------------------------------------------------------
-
-export function useAuth() {
-  const [token, setToken] = useState(() => sessionStorage.getItem(TOKEN_KEY) || null);
+const AuthContext = createContext(null);
+const readToken = () => { try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; } };
+const storeToken = token => { try { if (token) sessionStorage.setItem(TOKEN_KEY, token); else sessionStorage.removeItem(TOKEN_KEY); } catch { /* In-memory auth works with storage disabled. */ } };
+export function AuthProvider({ children }) {
+  const [token, setToken] = useState(readToken);
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-
-  // Fetch the current user profile from /auth/me whenever the token changes
-  const loadMe = useCallback(async (accessToken) => {
-    if (!accessToken) {
-      setUser(null);
-      setProfile(null);
-      setLoading(false);
-      return;
-    }
-    try {
-      const me = await apiMe(accessToken);
-      // Backend returns a user object; normalise it to the shape the rest of the
-      // app expects (same field names used by all components).
-      const normalised = {
-        id: me.id,
-        email: me.email,
-        name: me.name || me.email?.split('@')[0] || 'User',
-        role: me.role || 'student',
-        school: me.school || 'Model Higher Secondary School',
-        studentClass: me.student_class || me.studentClass || 'Class 11-A',
-        studentHouse: me.student_house || me.studentHouse || 'Terra House',
-        // Aliases used by various components
-        student_class: me.student_class || me.studentClass || 'Class 11-A',
-        student_house: me.student_house || me.studentHouse || 'Terra House',
-      };
-      setUser(normalised);
-      setProfile(normalised);
-    } catch {
-      // Token is invalid or expired — clear it
-      sessionStorage.removeItem(TOKEN_KEY);
-      setToken(null);
-      setUser(null);
-      setProfile(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Initial load
+  const [error, setError] = useState('');
+  const [version, setVersion] = useState(0);
+  const currentToken = useRef(token);
+  const refreshProfile = useCallback(() => setVersion(n => n + 1), []);
+  const signOut = useCallback(() => { storeToken(null); setToken(null); setUser(null); setProfile(null); setError(''); setLoading(false); }, []);
+  useEffect(() => { currentToken.current = token; }, [token]);
   useEffect(() => {
-    loadMe(token);
-  }, [token, loadMe]);
-
-  // Listen for storage events (other tabs signing out)
+    const expired = event => { if (event.detail === currentToken.current) signOut(); };
+    window.addEventListener('ecomesh:expired', expired);
+    return () => window.removeEventListener('ecomesh:expired', expired);
+  }, [signOut]);
   useEffect(() => {
-    const handleStorage = (e) => {
-      if (e.key === TOKEN_KEY) {
-        const newToken = e.newValue;
-        setToken(newToken);
-      }
+    const controller = new AbortController();
+    if (!token) return () => controller.abort();
+    (async () => {
+      try {
+        const me = await get('/auth/me', token, controller.signal);
+        let student = null;
+        if (me.student_id) student = await get(`/students/${segment(me.student_id)}/summary`, token, controller.signal);
+        if (controller.signal.aborted) return;
+        setUser(me); setProfile(student); setError('');
+      } catch (err) {
+        if (!controller.signal.aborted) { if (err.status === 401) signOut(); else setError(err.message); }
+      } finally { if (!controller.signal.aborted) setLoading(false); }
+    })();
+    return () => controller.abort();
+  }, [token, version, signOut]);
+  useEffect(() => {
+    if (!token || user?.role !== 'student') return;
+    const id = setInterval(refreshProfile, 12000);
+    return () => clearInterval(id);
+  }, [token, user?.role, refreshProfile]);
+  useEffect(() => {
+    if (!token) return;
+    const refresh = async () => {
+      try {
+        const result = await post('/auth/refresh', undefined, token);
+        if (currentToken.current === token) { storeToken(result.access_token); setToken(result.access_token); }
+      } catch { /* A valid token is retained through transient refresh failures. */ }
     };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, []);
-
-  // Wrapped signIn that also updates local state
-  const handleSignIn = async (email, password) => {
-    const accessToken = await signIn(email, password);
-    setToken(accessToken);
-    await loadMe(accessToken);
-  };
-
-  // Wrapped signUp that also updates local state
-  const handleSignUp = async (params) => {
-    const accessToken = await signUp(params);
-    setToken(accessToken);
-    await loadMe(accessToken);
-  };
-
-  // Wrapped signOut that also clears local state
-  const handleSignOut = () => {
-    signOut();
-    setToken(null);
-    setUser(null);
-    setProfile(null);
-  };
-
-  return {
-    user,
-    profile,
-    loading,
-    token,
-    isAuthenticated: !!user,
-    signIn: handleSignIn,
-    signUp: handleSignUp,
-    signOut: handleSignOut,
-  };
+    const id = setInterval(refresh, 30 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [token]);
+  const signIn = async (username, password) => { const result = await apiLogin(username, password); setLoading(true); storeToken(result.access_token); setToken(result.access_token); };
+  const signUp = async body => { await apiRegister(body); await signIn(body.username, body.password); };
+  const value = { user, profile, token, loading: loading && !!token, error, isAuthenticated: !!user, signIn, signUp, signOut, refreshProfile };
+  return createElement(AuthContext.Provider, { value }, children);
 }
+export function useAuth() { const value = useContext(AuthContext); if (!value) throw new Error('useAuth requires AuthProvider'); return value; }
