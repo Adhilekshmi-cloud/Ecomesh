@@ -1,0 +1,13 @@
+import { useState } from 'react';
+import { Trophy } from 'lucide-react';
+import { useAuth } from '../lib/auth';
+import { query, segment } from '../lib/api';
+import { useResource } from '../lib/resource';
+import { number } from '../lib/presentation';
+import { Empty, PageHeader, Panel, ResourceState } from './ui';
+export default function Leaderboard({ schoolId, revision }) {
+  const { user, profile, token } = useAuth(); const [view, setView] = useState('class');
+  const isMyClass = view === 'my-class';
+  const resource = useResource(schoolId && (!isMyClass || profile?.class_name) ? `/leaderboard/${segment(schoolId)}${query({ group: isMyClass ? 'student' : view, limit: 100, class_name: isMyClass ? profile.class_name : undefined })}` : null, token, revision, 30000);
+  return <><PageHeader eyebrow="A SHARED SENSE OF PROGRESS" title="Better, together." description="Real campus standings, ranked by server-awarded points." /><div className="segmented standings-tabs" role="group" aria-label="Standings group">{[['class', 'Classes'], ['house', 'Houses'], [user.role === 'student' ? 'my-class' : 'student', user.role === 'student' ? 'My class' : 'Students']].map(([key, label]) => <button key={key} className={view === key ? 'selected' : ''} onClick={() => setView(key)}>{label}</button>)}</div><Panel title={view === 'class' ? 'Class standings' : view === 'house' ? 'House standings' : isMyClass ? profile?.class_name || 'Your class' : 'Student standings'} label="THE CAMPUS LEADERBOARD"><ResourceState resource={resource}>{rows => rows.length ? <div className="table-scroll"><table className="standings-table"><thead><tr><th>Rank</th><th>{view === 'class' ? 'Class' : view === 'house' ? 'House' : 'Student'}</th><th>EcoPoints</th><th>Impact · kg CO₂e</th><th>{view === 'class' || view === 'house' ? 'Students' : 'Level'}</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${view}-${index}`}><td><span className={`rank rank-${row.rank}`}>{row.rank === 1 ? <Trophy size={17} /> : String(row.rank).padStart(2, '0')}</span></td><td><strong>{row.class || row.house || row.name || 'Unassigned'}</strong>{row.class_name && <small className="block muted">{row.class_name}</small>}</td><td className="points-cell">{number(row.points)}</td><td>{number(row.kg_co2e)}</td><td>{row.students == null ? row.level : number(row.students)}</td></tr>)}</tbody></table></div> : <Empty title="The field is open">Campus standings will appear as students join and earn points.</Empty>}</ResourceState><p className="table-caption">Up to 100 entries. Student names are shortened by the backend.</p></Panel></>;
+}

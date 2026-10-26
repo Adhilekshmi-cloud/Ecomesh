@@ -1,0 +1,12 @@
+import { ShieldCheck, Eye, UserCheck, Leaf, Sprout, ArrowRight } from 'lucide-react';
+import { PageHeader, Panel } from './ui';
+const stages = [
+  [ShieldCheck, '01', 'The evidence check', 'The backend checks exact and near-duplicate photos, the supplied capture time, and location against the registered school radius. Uploads are limited to seven days; photos older than 24 hours lose freshness trust.'],
+  [Eye, '02', 'The image assessment', 'Image analysis adjusts the trust score. If the image check cannot run, an otherwise verified action is sent for human review. No client-side score approves an action.'],
+  [UserCheck, '03', 'The human checkpoint', 'Teachers and admins decide actions marked as needing review. Home actions that pass the automatic checks wait for a guardian’s single-use confirmation.'],
+  [Leaf, '04', 'The impact calculation', 'Once verified, the backend applies its emission factor to the recorded quantity and stores the calculation method alongside the action.'],
+  [Sprout, '05', 'The growing record', 'The backend updates points, badges, level, and weekly streaks. Points are capped after three point-earning actions per action type per day. Weekly mission rewards are claimed separately.'],
+];
+export default function HowItWorks() {
+  return <><PageHeader eyebrow="BEHIND EVERY RECORDED ACTION" title="A clear path from proof to progress." description="Understand what EcoMesh checks, what it credits, and where people make the call." /><div className="process-cards">{stages.map(([Icon, index, title, description]) => <article className="process-card" key={index}><div><Icon size={29} strokeWidth={1.2} /><span>{index}</span></div><h2>{title}</h2><p>{description}</p><ArrowRight className="process-arrow" size={21} /></article>)}</div><div className="two-column"><Panel label="THE SHARED GOAL" title="A campus effort"><p className="muted">Your school’s verified impact contributes to its shared target. Campus totals, weekly trends, and class and house standings come from the backend.</p></Panel><Panel label="COMMUNITY INVESTMENT" title="Real funding, reviewed decisions"><p className="muted">Administrators record sponsor funds and project requests. The backend proposes allocations based on budget, need, and impact. An administrator reviews and approves or rejects the proposal. Recorded climate actions do not automatically generate money.</p></Panel></div></>;
+}
